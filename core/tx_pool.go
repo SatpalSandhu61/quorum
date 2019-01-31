@@ -161,7 +161,7 @@ var DefaultTxPoolConfig = TxPoolConfig{
 
 // sanitize checks the provided user configurations and changes anything that's
 // unreasonable or unworkable.
-func (config *TxPoolConfig) sanitize() TxPoolConfig {
+func (config *TxPoolConfig) sanitize(isQuorum bool) TxPoolConfig {
 	conf := *config
 	if conf.Rejournal < time.Second {
 		log.Warn("Sanitizing invalid txpool journal time", "provided", conf.Rejournal, "updated", time.Second)
@@ -170,6 +170,10 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 	if conf.PriceLimit < 1 {
 		log.Warn("Sanitizing invalid txpool price limit", "provided", conf.PriceLimit, "updated", DefaultTxPoolConfig.PriceLimit)
 		conf.PriceLimit = DefaultTxPoolConfig.PriceLimit
+	}
+	if isQuorum && (conf.PriceLimit == DefaultTxPoolConfig.PriceLimit) {
+		log.Warn("Sanitizing invalid txpool price limit for Quorum", "provided", conf.PriceLimit, "updated 0")
+		conf.PriceLimit = 0
 	}
 	if conf.PriceBump < 1 {
 		log.Warn("Sanitizing invalid txpool price bump", "provided", conf.PriceBump, "updated", DefaultTxPoolConfig.PriceBump)
@@ -219,7 +223,7 @@ type TxPool struct {
 // transactions from the network.
 func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
-	config = (&config).sanitize()
+	config = (&config).sanitize(chainconfig.IsQuorum)
 
 	// Create the transaction pool with its initial settings
 	pool := &TxPool{
@@ -722,7 +726,6 @@ func (pool *TxPool) journalTx(from common.Address, tx *types.Transaction) {
 	}
 }
 
-
 // promoteTx adds a transaction to the pending (processable) list of transactions
 // and returns whether it was inserted or an older was better.
 //
@@ -1203,7 +1206,6 @@ func newTxLookup() *txLookup {
 		all: make(map[common.Hash]*types.Transaction),
 	}
 }
-
 
 // Range calls f on each key and value present in the map.
 func (t *txLookup) Range(f func(hash common.Hash, tx *types.Transaction) bool) {
