@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"io"
 	"math/big"
 
@@ -251,7 +252,9 @@ func (c *stateObject) AddBalance(amount *big.Int) {
 
 		return
 	}
+	log.Info("===== Prior account balance", "account", c.address, "balance", c.Balance(), "amount", amount)
 	c.SetBalance(new(big.Int).Add(c.Balance(), amount))
+	log.Info("===== Post account balance", "account", c.address, "balance", c.Balance())
 }
 
 // SubBalance removes amount from c's balance.

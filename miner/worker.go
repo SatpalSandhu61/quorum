@@ -35,7 +35,6 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
-	"gopkg.in/fatih/set.v0"
 )
 
 const (
@@ -137,6 +136,7 @@ type worker struct {
 }
 
 func newWorker(config *params.ChainConfig, engine consensus.Engine, coinbase common.Address, eth Backend, mux *event.TypeMux) *worker {
+	log.Info("===== worker.go::newWorker() creating worker", "coinbase",  coinbase)
 	worker := &worker{
 		config:         config,
 		engine:         engine,
@@ -174,6 +174,7 @@ func (self *worker) setEtherbase(addr common.Address) {
 	self.mu.Lock()
 	defer self.mu.Unlock()
 	self.coinbase = addr
+	log.Info("===== worker.go::setEtherbase() setting coinbase", "coinbase",  self.coinbase)
 }
 
 func (self *worker) setExtra(extra []byte) {
@@ -467,6 +468,7 @@ func (self *worker) commitNewWork() {
 	}
 	// Only set the coinbase if we are mining (avoid spurious block rewards)
 	if atomic.LoadInt32(&self.mining) == 1 {
+		log.Info("===== worker.go::commitNewWork() Setting Coinbase in header", "coinbase", self.coinbase);
 		header.Coinbase = self.coinbase
 	}
 	if err := self.engine.Prepare(self.chain, header); err != nil {

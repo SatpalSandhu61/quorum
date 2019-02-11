@@ -267,6 +267,7 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 	}
 	if !isPrivate {
 		st.refundGas()
+		log.Info("===== Rewarding node for minting", "account", st.evm.Coinbase, "value", new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
 		st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
 	}
 

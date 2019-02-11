@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -59,6 +60,7 @@ func (b *BlockGen) SetCoinbase(addr common.Address) {
 		panic("coinbase can only be set once")
 	}
 	b.header.Coinbase = addr
+	log.Info("===== chain_makers.go::SetCoinbase() Setting Coinbase", "coinbase", b.header.Coinbase);
 	b.gasPool = new(GasPool).AddGas(b.header.GasLimit)
 }
 
