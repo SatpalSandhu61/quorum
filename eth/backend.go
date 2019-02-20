@@ -388,6 +388,7 @@ func (s *Ethereum) StartMining(local bool) error {
 		// will ensure that private networks work in single miner mode too.
 		atomic.StoreUint32(&s.protocolManager.acceptTxs, 1)
 	}
+	log.Info("===== backend.go::StartMining() STARTING", "coinbase",  eb)
 	go s.miner.Start(eb)
 	return nil
 }

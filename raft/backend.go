@@ -48,7 +48,8 @@ func New(ctx *node.ServiceContext, chainConfig *params.ChainConfig, raftId, raft
 		nodeKey:        ctx.NodeKey(),
 	}
 
-	service.minter = newMinter(chainConfig, service, blockTime)
+	etherbase, _ := e.Etherbase()
+	service.minter = newMinter(chainConfig, service, blockTime, etherbase)
 
 	var err error
 	if service.raftProtocolManager, err = NewProtocolManager(raftId, raftPort, service.blockchain, service.eventMux, startPeers, joinExisting, datadir, service.minter, service.downloader); err != nil {

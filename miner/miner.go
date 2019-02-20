@@ -40,6 +40,7 @@ type Backend interface {
 	BlockChain() *core.BlockChain
 	TxPool() *core.TxPool
 	ChainDb() ethdb.Database
+	Etherbase() (eb common.Address, err error)
 }
 
 // Miner creates blocks and searches for proof-of-work values.
@@ -58,11 +59,13 @@ type Miner struct {
 }
 
 func New(eth Backend, config *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine) *Miner {
+	etherbase, _ := eth.Etherbase()
+	log.Info("===== miner.go::New() NOTE: setting coinbase", "coinbase",  etherbase)
 	miner := &Miner{
 		eth:      eth,
 		mux:      mux,
 		engine:   engine,
-		worker:   newWorker(config, engine, common.Address{}, eth, mux),
+		worker:   newWorker(config, engine, etherbase, eth, mux),
 		canStart: 1,
 	}
 	miner.Register(NewCpuAgent(eth.BlockChain(), engine))
@@ -93,6 +96,7 @@ out:
 			atomic.StoreInt32(&self.canStart, 1)
 			atomic.StoreInt32(&self.shouldStart, 0)
 			if shouldStart {
+				log.Info("===== miner.go::update() STARTING", "coinbase",  self.coinbase)
 				self.Start(self.coinbase)
 			}
 			// unsubscribe. we're only interested in this event once
