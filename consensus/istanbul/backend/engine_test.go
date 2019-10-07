@@ -47,7 +47,7 @@ func newBlockChain(n int) (*core.BlockChain, *backend) {
 	// Use the first key as private key
 	b, _ := New(config, nodeKeys[0], memDB).(*backend)
 	genesis.MustCommit(memDB)
-	blockchain, err := core.NewBlockChain(memDB, nil, genesis.Config, b, vm.Config{})
+	blockchain, err := core.NewBlockChain(memDB, nil, genesis.Config, b, vm.Config{}, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -120,7 +120,7 @@ func makeHeader(parent *types.Block, config *istanbul.Config) *types.Header {
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     parent.Number().Add(parent.Number(), common.Big1),
-		GasLimit:   core.CalcGasLimit(parent),
+		GasLimit:   core.CalcGasLimit(parent, parent.GasLimit(), parent.GasLimit()),
 		GasUsed:    0,
 		Extra:      parent.Extra(),
 		Time:       new(big.Int).Add(parent.Time(), new(big.Int).SetUint64(config.BlockPeriod)),
@@ -131,8 +131,11 @@ func makeHeader(parent *types.Block, config *istanbul.Config) *types.Header {
 
 func makeBlock(chain *core.BlockChain, engine *backend, parent *types.Block) *types.Block {
 	block := makeBlockWithoutSeal(chain, engine, parent)
-	block, _ = engine.Seal(chain, block, nil)
-	return block
+	stopCh := make(chan struct{})
+	resultCh := make(chan *types.Block, 10)
+	go engine.Seal(chain, block, resultCh, stopCh)
+	blk := <-resultCh
+	return blk
 }
 
 func makeBlockWithoutSeal(chain *core.BlockChain, engine *backend, parent *types.Block) *types.Block {
@@ -174,10 +177,15 @@ func TestSealStopChannel(t *testing.T) {
 		eventSub.Unsubscribe()
 	}
 	go eventLoop()
-	finalBlock, err := engine.Seal(chain, block, stop)
-	if err != nil {
-		t.Errorf("error mismatch: have %v, want nil", err)
-	}
+	resultCh := make(chan *types.Block, 10)
+	go func() {
+		err := engine.Seal(chain, block, resultCh, stop)
+		if err != nil {
+			t.Errorf("error mismatch: have %v, want nil", err)
+		}
+	}()
+
+	finalBlock := <-resultCh
 	if finalBlock != nil {
 		t.Errorf("block mismatch: have %v, want nil", finalBlock)
 	}
@@ -187,30 +195,44 @@ func TestSealCommittedOtherHash(t *testing.T) {
 	chain, engine := newBlockChain(4)
 	block := makeBlockWithoutSeal(chain, engine, chain.Genesis())
 	otherBlock := makeBlockWithoutSeal(chain, engine, block)
+	expectedCommittedSeal := append([]byte{1, 2, 3}, bytes.Repeat([]byte{0x00}, types.IstanbulExtraSeal-3)...)
+
 	eventSub := engine.EventMux().Subscribe(istanbul.RequestEvent{})
-	eventLoop := func() {
+	blockOutputChannel := make(chan *types.Block)
+	stopChannel := make(chan struct{})
+
+	go func() {
 		select {
 		case ev := <-eventSub.Chan():
-			_, ok := ev.Data.(istanbul.RequestEvent)
-			if !ok {
+			if _, ok := ev.Data.(istanbul.RequestEvent); !ok {
 				t.Errorf("unexpected event comes: %v", reflect.TypeOf(ev.Data))
 			}
-			engine.Commit(otherBlock, [][]byte{})
+			if err := engine.Commit(otherBlock, [][]byte{expectedCommittedSeal}); err != nil {
+				t.Error(err.Error())
+			}
 		}
 		eventSub.Unsubscribe()
-	}
-	go eventLoop()
-	seal := func() {
-		engine.Seal(chain, block, nil)
-		t.Error("seal should not be completed")
-	}
-	go seal()
+	}()
 
-	const timeoutDura = 2 * time.Second
-	timeout := time.NewTimer(timeoutDura)
+	go func() {
+		if err := engine.Seal(chain, block, blockOutputChannel, stopChannel); err != nil {
+			t.Error(err.Error())
+		}
+	}()
+
 	select {
-	case <-timeout.C:
-		// wait 2 seconds to ensure we cannot get any blocks from Istanbul
+	case <-blockOutputChannel:
+		t.Error("Wrong block found!")
+	default:
+		//no block found, stop the sealing
+		close(stopChannel)
+	}
+
+	select {
+	case output := <-blockOutputChannel:
+		if output != nil {
+			t.Error("Block not nil!")
+		}
 	}
 }
 
@@ -218,11 +240,16 @@ func TestSealCommitted(t *testing.T) {
 	chain, engine := newBlockChain(1)
 	block := makeBlockWithoutSeal(chain, engine, chain.Genesis())
 	expectedBlock, _ := engine.updateBlock(engine.chain.GetHeader(block.ParentHash(), block.NumberU64()-1), block)
+	resultCh := make(chan *types.Block, 10)
+	go func() {
+		err := engine.Seal(chain, block, resultCh, make(chan struct{}))
 
-	finalBlock, err := engine.Seal(chain, block, nil)
-	if err != nil {
-		t.Errorf("error mismatch: have %v, want nil", err)
-	}
+		if err != nil {
+			t.Errorf("error mismatch: have %v, want %v", err, expectedBlock)
+		}
+	}()
+
+	finalBlock := <-resultCh
 	if finalBlock.Hash() != expectedBlock.Hash() {
 		t.Errorf("hash mismatch: have %v, want %v", finalBlock.Hash(), expectedBlock.Hash())
 	}

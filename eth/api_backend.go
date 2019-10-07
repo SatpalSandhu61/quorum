@@ -18,6 +18,7 @@ package eth
 
 import (
 	"context"
+	"errors"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts"
@@ -25,7 +26,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/bloombits"
-	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -41,6 +41,11 @@ import (
 type EthAPIBackend struct {
 	eth *Ethereum
 	gpo *gasprice.Oracle
+
+	// Quorum
+	//
+	// hex node id from node public key
+	hexNodeId string
 }
 
 // ChainConfig returns the active chain configuration.
@@ -68,6 +73,10 @@ func (b *EthAPIBackend) HeaderByNumber(ctx context.Context, blockNr rpc.BlockNum
 		return b.eth.blockchain.CurrentBlock().Header(), nil
 	}
 	return b.eth.blockchain.GetHeaderByNumber(uint64(blockNr)), nil
+}
+
+func (b *EthAPIBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return b.eth.blockchain.GetHeaderByHash(hash), nil
 }
 
 func (b *EthAPIBackend) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Block, error) {
@@ -116,18 +125,11 @@ func (b *EthAPIBackend) GetBlock(ctx context.Context, hash common.Hash) (*types.
 }
 
 func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
-	if number := rawdb.ReadHeaderNumber(b.eth.chainDb, hash); number != nil {
-		return rawdb.ReadReceipts(b.eth.chainDb, hash, *number), nil
-	}
-	return nil, nil
+	return b.eth.blockchain.GetReceiptsByHash(hash), nil
 }
 
 func (b *EthAPIBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
-	number := rawdb.ReadHeaderNumber(b.eth.chainDb, hash)
-	if number == nil {
-		return nil, nil
-	}
-	receipts := rawdb.ReadReceipts(b.eth.chainDb, hash, *number)
+	receipts := b.eth.blockchain.GetReceiptsByHash(hash)
 	if receipts == nil {
 		return nil, nil
 	}
@@ -185,6 +187,11 @@ func (b *EthAPIBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscri
 }
 
 func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
+	// validation for node need to happen here and cannot be done as a part of
+	// validateTx in tx_pool.go as tx_pool validation will happen in every node
+	if b.hexNodeId != "" && !types.ValidateNodeForTxn(b.hexNodeId, signedTx.From()) {
+		return errors.New("cannot send transaction from this node")
+	}
 	return b.eth.txPool.AddLocal(signedTx)
 }
 
@@ -256,6 +263,7 @@ func (b *EthAPIBackend) ServiceFilter(ctx context.Context, session *bloombits.Ma
 	}
 }
 
+// used by Quorum
 type EthAPIState struct {
 	state, privateState *state.StateDB
 }
@@ -286,6 +294,41 @@ func (s EthAPIState) GetNonce(addr common.Address) uint64 {
 		return s.privateState.GetNonce(addr)
 	}
 	return s.state.GetNonce(addr)
+}
+
+func (s EthAPIState) GetProof(addr common.Address) ([][]byte, error) {
+	if s.privateState.Exist(addr) {
+		return s.privateState.GetProof(addr)
+	}
+	return s.state.GetProof(addr)
+}
+
+func (s EthAPIState) GetStorageProof(addr common.Address, h common.Hash) ([][]byte, error) {
+	if s.privateState.Exist(addr) {
+		return s.privateState.GetStorageProof(addr, h)
+	}
+	return s.state.GetStorageProof(addr, h)
+}
+
+func (s EthAPIState) StorageTrie(addr common.Address) state.Trie {
+	if s.privateState.Exist(addr) {
+		return s.privateState.StorageTrie(addr)
+	}
+	return s.state.StorageTrie(addr)
+}
+
+func (s EthAPIState) Error() error {
+	if s.privateState.Error() != nil {
+		return s.privateState.Error()
+	}
+	return s.state.Error()
+}
+
+func (s EthAPIState) GetCodeHash(addr common.Address) common.Hash {
+	if s.privateState.Exist(addr) {
+		return s.privateState.GetCodeHash(addr)
+	}
+	return s.state.GetCodeHash(addr)
 }
 
 //func (s MinimalApiState) Error

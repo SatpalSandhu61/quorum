@@ -36,7 +36,7 @@ var (
 The State Transitioning Model
 
 A state transition is a change made when a transaction is applied to the current world state
-The state transitioning model does all all the necessary work to work out a valid new state root.
+The state transitioning model does all the necessary work to work out a valid new state root.
 
 1) Nonce handling
 2) Pre pay gas
@@ -186,8 +186,14 @@ func (st *StateTransition) preCheck() error {
 }
 
 // TransitionDb will transition the state by applying the current message and
-// returning the result including the the used gas. It returns an error if it
-// failed. An error indicates a consensus issue.
+// returning the result including the used gas. It returns an error if failed.
+// An error indicates a consensus issue.
+//
+// Quorum:
+// 1. Intrinsic gas is calculated based on the encrypted payload hash
+//    and NOT the actual private payload
+// 2. For private transactions, we only deduct intrinsic gas from the gas pool
+//    regardless the current node is party to the transaction or not
 func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bool, err error) {
 	if err = st.preCheck(); err != nil {
 		return
@@ -218,7 +224,9 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 		data = st.data
 	}
 
-	// Pay intrinsic gas
+	// Pay intrinsic gas. For a private contract this is done using the public hash passed in,
+	// not the private data retrieved above. This is because we need any (participant) validator
+	// node to get the same result as a (non-participant) minter node, to avoid out-of-gas issues.
 	gas, err := IntrinsicGas(st.data, contractCreation, homestead)
 	if err != nil {
 		return nil, 0, false, err
@@ -228,14 +236,15 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 	}
 
 	var (
-		evm = st.evm
+		leftoverGas uint64
+		evm         = st.evm
 		// vm errors do not effect consensus and are therefor
 		// not assigned to err, except for insufficient balance
 		// error.
 		vmerr error
 	)
 	if contractCreation {
-		ret, _, st.gas, vmerr = evm.Create(sender, data, st.gas, st.value)
+		ret, _, leftoverGas, vmerr = evm.Create(sender, data, st.gas, st.value)
 	} else {
 		// Increment the account nonce only if the transaction isn't private.
 		// If the transaction is private it has already been incremented on
@@ -251,13 +260,15 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 		}
 		//if input is empty for the smart contract call, return
 		if len(data) == 0 && isPrivate {
+			st.refundGas()
+			st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
 			return nil, 0, false, nil
 		}
 
-		ret, st.gas, vmerr = evm.Call(sender, to, data, st.gas, st.value)
+		ret, leftoverGas, vmerr = evm.Call(sender, to, data, st.gas, st.value)
 	}
 	if vmerr != nil {
-		log.Debug("VM returned with error", "err", vmerr)
+		log.Info("VM returned with error", "err", vmerr)
 		// The only possible consensus-error would be if there wasn't
 		// sufficient balance to make the transfer happen. The first
 		// balance transfer may never fail.
@@ -265,11 +276,18 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 			return nil, 0, false, vmerr
 		}
 	}
+
+	// Pay gas used during contract creation or execution (st.gas tracks remaining gas)
+	// However, if private contract then we don't want to do this else we can get
+	// a mismatch between a (non-participant) minter and (participant) validator,
+	// which can cause a 'BAD BLOCK' crash.
 	if !isPrivate {
-		st.refundGas()
-		log.Info("===== Rewarding node for minting", "account", st.evm.Coinbase, "value", new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
-		st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
+		st.gas = leftoverGas
 	}
+
+	st.refundGas()
+	log.Info("===== Rewarding node for minting", "account", st.evm.Coinbase, "value", new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
+	st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
 
 	if isPrivate {
 		return ret, 0, vmerr != nil, err
