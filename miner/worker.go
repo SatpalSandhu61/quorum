@@ -188,7 +188,6 @@ type worker struct {
 }
 
 func newWorker(config *params.ChainConfig, engine consensus.Engine, coinbase common.Address, eth Backend, mux *event.TypeMux, recommit time.Duration, gasFloor, gasCeil uint64, isLocalBlock func(*types.Block) bool) *worker {
-	log.Info("===== worker.go::newWorker() creating worker", "coinbase",  coinbase)
 	worker := &worker{
 		config:             config,
 		engine:             engine,
@@ -243,7 +242,6 @@ func (w *worker) setEtherbase(addr common.Address) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.coinbase = addr
-	log.Info("===== worker.go::setEtherbase() setting coinbase", "coinbase",  w.coinbase)
 }
 
 // setExtra sets the content used to initialize the block extra field.

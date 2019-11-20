@@ -426,8 +426,9 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool {
 func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	if _, ok := s.engine.(consensus.Istanbul); ok {
-		log.Error("Cannot set etherbase in Istanbul consensus")
+	consensusAlgo := s.protocolManager.getConsensusAlgorithm()
+	if consensusAlgo == "istanbul" || consensusAlgo == "clique" || consensusAlgo == "raft" {
+		log.Error("Cannot set etherbase with selected consensus mechanism")
 		return
 	}
 	s.etherbase = etherbase
@@ -476,7 +477,6 @@ func (s *Ethereum) StartMining(threads int) error {
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.protocolManager.acceptTxs, 1)
 
-		log.Info("===== backend.go::StartMining() STARTING", "coinbase",  eb)
 		go s.miner.Start(eb)
 	}
 	return nil
