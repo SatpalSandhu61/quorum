@@ -90,7 +90,7 @@ func newMinter(config *params.ChainConfig, eth *RaftService, blockTime time.Dura
 		coinbase:         etherbase,
 
 		invalidRaftOrderingChan: make(chan InvalidRaftOrdering, 1),
-		chainHeadChan:           make(chan core.ChainHeadEvent, 1),
+		chainHeadChan:           make(chan core.ChainHeadEvent, core.GetChainHeadChannleSize()),
 		txPreChan:               make(chan core.NewTxsEvent, 4096),
 	}
 
@@ -214,7 +214,7 @@ func throttle(rate time.Duration, f func()) func() {
 
 		for range ticker.C {
 			<-request.Out()
-			go f()
+			f()
 		}
 	}()
 
