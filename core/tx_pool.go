@@ -77,6 +77,14 @@ var (
 	// making the transaction invalid, rather a DOS protection.
 	ErrOversizedData = errors.New("oversized data")
 
+	// ErrInvalidGasPrice is returned if gas price is disabled but a gas price
+	// is specified in the transaction
+	ErrInvalidGasPrice = errors.New("Gas price not 0")
+
+	// ErrMissingGasPrice is returned if gas price is enabled but a gas price
+	// of zero is given in the transaction
+	ErrMissingGasPrice = errors.New("Gas price cannot be 0")
+
 	// ErrEtherValueUnsupported is returned if a transaction specifies an Ether Value
 	// for a private Quorum transaction.
 	ErrEtherValueUnsupported = errors.New("ether value is not supported for private transactions")
@@ -174,7 +182,7 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 		log.Warn("Sanitizing invalid txpool journal time", "provided", conf.Rejournal, "updated", time.Second)
 		conf.Rejournal = time.Second
 	}
-	if conf.PriceLimit < 1 {
+	if conf.PriceLimit < 1 && DefaultTxPoolConfig.PriceLimit > 0 {
 		log.Warn("Sanitizing invalid txpool price limit", "provided", conf.PriceLimit, "updated", DefaultTxPoolConfig.PriceLimit)
 		conf.PriceLimit = DefaultTxPoolConfig.PriceLimit
 	}
@@ -580,6 +588,15 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	sizeLimit := pool.chainconfig.TransactionSizeLimit
 	if sizeLimit == 0 {
 		sizeLimit = DefaultTxPoolConfig.TransactionSizeLimit
+	}
+
+	// Reject transaction if gas price is disabled, but gas price is specified
+	if (!pool.chainconfig.EnableGasPrice) && tx.GasPrice().Cmp(common.Big0) != 0 {
+		return ErrInvalidGasPrice
+	}
+	// Reject transaction if gas price is enabled, but gas price is not specified
+	if pool.chainconfig.EnableGasPrice && tx.GasPrice().Cmp(common.Big0) == 0 {
+		return ErrMissingGasPrice
 	}
 
 	// Reject transactions over 32KB (or manually set limit) to prevent DOS attacks
