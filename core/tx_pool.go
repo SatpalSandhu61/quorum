@@ -485,6 +485,14 @@ func (pool *TxPool) GasPrice() *big.Int {
 // SetGasPrice updates the minimum price required by the transaction pool for a
 // new transaction, and drops all transactions below this threshold.
 func (pool *TxPool) SetGasPrice(price *big.Int) {
+
+	//Quorum
+	if !pool.chainconfig.EnableGasPrice {
+		log.Info("Transaction pool price threshold not updated as gasPrice is not enabled")
+		return
+	}
+	//End-Quorum
+
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
